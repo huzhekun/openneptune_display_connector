@@ -38,6 +38,9 @@ PAGE_LEVELING_Z_OFFSET_ADJUST = "leveling_z_offset_adjust"
 
 PAGE_OVERLAY_LOADING = "wifi_scaning"
 
+PAGE_WIFI_LIST = "wifi_list"
+PAGE_WIFI_KEYBOARD = "wifi_keyboard"
+
 PAGE_LIGHTS = "lights"
 
 

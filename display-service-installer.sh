@@ -53,6 +53,10 @@ sudo chmod +x "$AFFINITY_SCRIPT_PATH" >/dev/null
 echo "Installing affinity.service to $AFFINITY_SERVICE_FILE"
 sudo cp "$DISPLAY_CONNECTOR_PATH/affinity.service" "$AFFINITY_SERVICE_FILE" >/dev/null
 
+# --- Wi-Fi permissions ------------------------------------------------------
+echo "Allowing $USER to manage Wi-Fi from the touchscreen..."
+sudo sh "$DISPLAY_CONNECTOR_PATH/wifi-permissions-setup.sh" "$USER" || echo "Warning: Wi-Fi permission setup failed; on-screen Wi-Fi setup will not work."
+
 # --- Reload systemd ----------------------------------------------------------
 echo "Reloading systemd units..."
 sudo systemctl daemon-reload

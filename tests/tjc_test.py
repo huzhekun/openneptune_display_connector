@@ -2,7 +2,7 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from src.tjc import EventType, TJCClient, TJCNumericInputPayload, TJCProtocol, TJCTouchCoordinatePayload, TJCTouchDataPayload
+from src.tjc import EventType, TJCClient, TJCNumericInputPayload, TJCProtocol, TJCStringInputPayload, TJCTouchCoordinatePayload, TJCTouchDataPayload
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +62,46 @@ async def test_data_received_variable():
     protocol.data_received(b"\x70\x10\x20\x30\x40\xFF\xFF\xFF")
     item = await protocol.queue.get()
     assert item == b"\x70\x10\x20\x30\x40"
+
+
+def test_keyboard_input_without_terminator_is_flushed():
+    m = MagicMock()
+    protocol = TJCProtocol(m)
+    protocol.data_received(b"\x70\x84\x02hunter")
+    protocol.data_received(b"22")
+    m.assert_not_called()
+    assert protocol._keyboard_input_timer is not None
+    protocol._flush_keyboard_input()
+    m.assert_called_once_with(b"\x70\x84\x02hunter22")
+    assert protocol.buffer == b""
+
+
+@pytest.mark.asyncio
+async def test_keyboard_input_flushes_after_idle():
+    m = MagicMock()
+    protocol = TJCProtocol(m)
+    protocol.data_received(b"\x70\x84\x02secret")
+    await asyncio.sleep(0.1)
+    m.assert_called_once_with(b"\x70\x84\x02secret")
+
+
+@pytest.mark.asyncio
+async def test_terminated_string_reply_is_not_keyboard_input():
+    m = MagicMock()
+    protocol = TJCProtocol(m)
+    protocol.data_received(b"\x701.2.18")
+    protocol.data_received(b"\xFF\xFF\xFF")
+    assert protocol._keyboard_input_timer is None
+    assert await protocol.queue.get() == b"\x701.2.18"
+    m.assert_not_called()
+
+
+def test_event_keyboard_input():
+    m = MagicMock()
+    client = TJCClient(None)
+    client._schedule_event_message_handler = m
+    client.event_message_handler(b"\x70\x84\x02hunter22")
+    m.assert_called_once_with(EventType.KEYBOARD_INPUT, TJCStringInputPayload(page_id=0x84, component_id=2, string="hunter22"))
 
 
 def test_event_touch_coordinate():

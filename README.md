@@ -24,3 +24,6 @@ Allows you to use the Touch screen from your neptune 3 or 4 printer with a stock
 ## Install
 
 Running the `display-service-installer.sh` script on your printer should be enough to get everything working. Currently the connector mostly works on printers with [OpenNept4une](https://github.com/OpenNeptune3D/OpenNept4une).
+## Wi-Fi Setup (Neptune 4 Plus/Max)
+
+On the Elegoo display firmware, Settings → WLAN lists nearby networks and joins one using the on-screen keyboard, through NetworkManager. The installer adds a polkit rule so the display service can do this without root. See [docs/wifi.md](docs/wifi.md) for how it works and how to test it.

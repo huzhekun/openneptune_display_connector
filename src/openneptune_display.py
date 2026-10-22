@@ -33,6 +33,8 @@ from src.mapping import (
     PAGE_PRINTING_DIALOG_FAN,
     PAGE_PRINTING_DIALOG_FLOW,
     PAGE_OVERLAY_LOADING,
+    PAGE_WIFI_LIST,
+    PAGE_WIFI_KEYBOARD,
     PAGE_LIGHTS,
     PAGE_SHUTDOWN_DIALOG,
     format_temp,
@@ -77,6 +79,8 @@ class OpenNeptuneDisplayMapper(Mapper):
         PAGE_PRINTING_DIALOG_FAN: "fan_speed",
         PAGE_PRINTING_DIALOG_FLOW: "flow_speed",
         PAGE_OVERLAY_LOADING: "wifi_scaning",
+        PAGE_WIFI_LIST: "wifi_list",
+        PAGE_WIFI_KEYBOARD: "keybdA",
         PAGE_LIGHTS: "led",
     }
 

@@ -9,6 +9,7 @@ from src.mapping import (
     PAGE_PREPARE_EXTRUDER,
     PAGE_SETTINGS_ABOUT,
     PAGE_PRINTING_KAMP,
+    PAGE_SETTINGS,
     format_temp,
 )
 from src.elegoo_display import ElegooDisplayMapper, ElegooDisplayCommunicator
@@ -112,10 +113,15 @@ class ElegooNeptune4ProMapper(ElegooNeptune4Mapper):
 
 
 class ElegooNeptune4PlusMapper(ElegooNeptune4Mapper):
-    pass
+    def __init__(self) -> None:
+        # The Plus/Max settings page has the WLAN entry. Copy the mapping so the
+        # change doesn't leak into the class-level dict other models share, and
+        # do it before super().__init__() builds data_mapping from it.
+        self.page_mapping = {**self.page_mapping, PAGE_SETTINGS: "set_4_max"}
+        super().__init__()
 
 
-class ElegooNeptune4MaxMapper(ElegooNeptune4Mapper):
+class ElegooNeptune4MaxMapper(ElegooNeptune4PlusMapper):
     pass
 
 

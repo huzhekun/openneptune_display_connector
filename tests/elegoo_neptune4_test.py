@@ -3,13 +3,49 @@ from unittest.mock import AsyncMock, call
 
 import pytest
 from src.neptune4 import MODEL_N4_MAX, MODEL_N4_PLUS, MODEL_N4_PRO, MODEL_N4_REGULAR, ElegooNeptune4DisplayCommunicator, ElegooNeptune4Mapper, ElegooNeptune4MaxMapper, ElegooNeptune4PlusMapper, ElegooNeptune4ProMapper
-from src.mapping import PAGE_PREPARE_TEMP, PAGE_PRINTING_FILAMENT
+from src.mapping import PAGE_PREPARE_TEMP, PAGE_PRINTING_FILAMENT, PAGE_SETTINGS
+from src.wifi import WifiNetwork
 
 
 def test_n4_pro_mapping():
     mapper = ElegooNeptune4ProMapper()
     assert mapper.map_page(PAGE_PREPARE_TEMP) == "pretemp"
     assert mapper.map_page(PAGE_PRINTING_FILAMENT) == "adjusttemp_pro"
+
+
+def test_plus_max_use_wlan_settings_page():
+    for mapper in (ElegooNeptune4PlusMapper(), ElegooNeptune4MaxMapper()):
+        assert mapper.map_page(PAGE_SETTINGS) == "set_4_max"
+        assert mapper.data_mapping["fan"]["speed"][1].fields == ["set_4_max.fanstatue"]
+    assert ElegooNeptune4Mapper().map_page(PAGE_SETTINGS) == "set"
+    assert ElegooNeptune4ProMapper().map_page(PAGE_SETTINGS) == "set"
+
+
+@pytest.mark.asyncio
+async def test_wifi_list_ui():
+    communicator = ElegooNeptune4DisplayCommunicator(logging, MODEL_N4_MAX, None)
+    communicator.display.command = AsyncMock()
+    networks = [
+        WifiNetwork("Home", 95, True, in_use=True),
+        WifiNetwork('Say "hi"', 50, True),
+        WifiNetwork("Cafe", 10, False),
+    ]
+    await communicator.update_wifi_list_ui(networks, 0, {"Cafe": "failed"}, True, "IP:192.168.1.20")
+    sent = [c.args[0] for c in communicator.display.command.call_args_list]
+    assert sent[:9] == [
+        'wifi_list.t0.txt="Home"',
+        "wifi_list.q0.picc=346",
+        "wifi_list.q8.picc=346",
+        "wifi_list.t1.txt=\"Say 'hi'\"",
+        "wifi_list.q1.picc=343",
+        "wifi_list.q9.picc=341",
+        'wifi_list.t2.txt="Cafe"',
+        "wifi_list.q2.picc=341",
+        "wifi_list.q10.picc=347",
+    ]
+    assert 'wifi_list.t7.txt=""' in sent
+    assert "wifi_list.q15.picc=340" in sent
+    assert sent[-2:] == ["wifi_list.q16.picc=348", 'wifi_list.t9.txt="IP:192.168.1.20"']
 
 
 def test_get_mapper_4():

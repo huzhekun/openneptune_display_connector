@@ -14,6 +14,9 @@ TJCTouchCoordinatePayload = namedtuple("TouchCoordinate", "x y touch_event")
 
 # Enum for event types
 class EventType(IntEnum):
+    # The stock keyboard page (keybdA) reports its text as 0x70, page, index, text
+    # with no FF FF FF terminator. Terminated 0x70 frames are replies to `get`.
+    KEYBOARD_INPUT = 0x70
     TOUCH = 0x65
     TOUCH_COORDINATE = 0x67
     TOUCH_IN_SLEEP = 0x68
@@ -26,6 +29,9 @@ class EventType(IntEnum):
     RECONNECTED = 0x666
 
 JUNK_DATA = b"Z\xa5\x06\x83\x10>\x01\x00"
+
+# An unterminated keyboard frame is complete once the display stops sending.
+KEYBOARD_INPUT_IDLE_SECONDS = 0.05
 
 class TJCProtocol(NextionProtocol):
     PACKET_LENGTH_MAP = {
@@ -46,9 +52,15 @@ class TJCProtocol(NextionProtocol):
         0xFE: 4,  # Transparent Data Ready
     }
 
+    _keyboard_input_timer = None
+
     def is_event(self, message):
         """Check if the message is a recognized event."""
-        return len(message) > 0 and message[0] in EventType.__members__.values()
+        return (
+            len(message) > 0
+            and message[0] in EventType.__members__.values()
+            and message[0] != EventType.KEYBOARD_INPUT
+        )
 
     def data_received(self, data):
         """Process received data and handle messages."""
@@ -62,6 +74,32 @@ class TJCProtocol(NextionProtocol):
                 self.event_message_handler(message)
             else:
                 self.queue.put_nowait(message)
+        self._schedule_keyboard_input_flush()
+
+    def _has_pending_keyboard_input(self):
+        return (
+            self.buffer[:1] == bytes([EventType.KEYBOARD_INPUT])
+            and self.EOL not in self.buffer
+        )
+
+    def _schedule_keyboard_input_flush(self):
+        if self._keyboard_input_timer is not None:
+            self._keyboard_input_timer.cancel()
+            self._keyboard_input_timer = None
+        if self._has_pending_keyboard_input():
+            self._keyboard_input_timer = asyncio.get_event_loop().call_later(
+                KEYBOARD_INPUT_IDLE_SECONDS, self._flush_keyboard_input
+            )
+
+    def _flush_keyboard_input(self):
+        """Hand an unterminated keyboard frame to the event handler."""
+        self._keyboard_input_timer = None
+        if not self._has_pending_keyboard_input():
+            return
+        message = self.buffer
+        self.buffer = b""
+        self._reset_dropped_buffer()
+        self.event_message_handler(message)
 
     def _extract_packet(self):
         """Extract a packet from the buffer based on the expected length."""
@@ -137,6 +175,18 @@ class TJCClient(Nextion):
         """Handle incoming event messages with error checking."""
         try:
             event_type = EventType(message[0])
+            if event_type == EventType.KEYBOARD_INPUT:
+                if len(message) < 3:
+                    self.logger.error("Received keyboard input without page/component data")
+                    return
+                try:
+                    text = message[3:].decode("utf-8")
+                except UnicodeDecodeError:
+                    text = message[3:].decode("latin-1")
+                self._schedule_event_message_handler(
+                    event_type, TJCStringInputPayload(message[1], message[2], text)
+                )
+                return
             payload_map = {
                 EventType.TOUCH_COORDINATE: (">HHB", TJCTouchCoordinatePayload),
                 EventType.TOUCH: ("BB", TJCTouchDataPayload),

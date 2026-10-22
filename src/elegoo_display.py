@@ -36,6 +36,8 @@ from src.mapping import (
     PAGE_PRINTING_DIALOG_FAN,
     PAGE_PRINTING_DIALOG_FLOW,
     PAGE_OVERLAY_LOADING,
+    PAGE_WIFI_LIST,
+    PAGE_WIFI_KEYBOARD,
     PAGE_LIGHTS,
     PAGE_SHUTDOWN_DIALOG,
     format_temp,
@@ -49,7 +51,32 @@ from src.colors import (
     TEXT_SUCCESS,
     TEXT_WARNING,
 )
-from src.wifi import get_wlan0_status
+from src.wifi import get_wlan0_status, signal_level
+
+WIFI_LIST_ROWS = 8
+
+# Picture ids used by the stock Elegoo firmware (APP 1.2.3.4 / UI 1.2.18) on the
+# wifi_list page. q0-q7 show the signal of each row, q8-q15 its lock/state icon.
+WIFI_PIC_EMPTY = 340
+WIFI_PIC_LOCKED = 341
+WIFI_SIGNAL_PICS = {1: 341, 2: 342, 3: 343, 4: 344}
+WIFI_CONNECTED_SIGNAL_PICS = {1: 353, 2: 354, 3: 355, 4: 346}
+WIFI_STATE_CONNECTING = "connecting"
+WIFI_STATE_CONNECTED = "connected"
+WIFI_STATE_FAILED = "failed"
+WIFI_STATE_PICS = {
+    WIFI_STATE_CONNECTING: 345,
+    WIFI_STATE_CONNECTED: 346,
+    WIFI_STATE_FAILED: 347,
+}
+WIFI_SWITCH_PICS = {True: 348, False: 347}
+
+
+def _wifi_text(value):
+    """Make a string safe to put inside a quoted txt assignment."""
+    value = value.replace('"', "'").replace("\\", "/")
+    encoded = value.encode("utf-8")[:32]
+    return encoded.decode("utf-8", "ignore")
 
 
 class ElegooDisplayMapper(Mapper):
@@ -84,6 +111,8 @@ class ElegooDisplayMapper(Mapper):
         PAGE_PRINTING_DIALOG_FAN: "fan_speed",
         PAGE_PRINTING_DIALOG_FLOW: "flow_speed",
         PAGE_OVERLAY_LOADING: "wifi_scaning",
+        PAGE_WIFI_LIST: "wifi_list",
+        PAGE_WIFI_KEYBOARD: "keybdA",
         PAGE_LIGHTS: "led",
     }
 
@@ -430,6 +459,9 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
             await self.write("b[3].maxval=200")
         elif current_page == PAGE_PRINTING_DIALOG_FLOW:
             await self.write("b[3].maxval=200")
+        elif current_page == PAGE_SETTINGS and self.mapper.map_page(PAGE_SETTINGS) == "set_4_max":
+            # Factory Settings is repurposed as the entry to the temperature presets
+            await self.write('t6.txt="Temperature Settings"')
         elif current_page == PAGE_SHUTDOWN_DIALOG:
             await self.write("fill 20,100,232,290," + str(BACKGROUND_DIALOG))  # Increased height to 290
             await self.write('xstr 24,104,224,50,1,65535,10665,1,1,1,"Shut Down Host"')
@@ -572,6 +604,43 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         else:
             await self.write(f"picq 230,0,42,42,{313 + rssi_category}")
         return True
+
+    def invalidate_wifi_status(self):
+        self._cached_wifi_status = None
+
+    async def update_wifi_list_ui(self, networks, wifi_page, states, radio_enabled, info_text):
+        """Draw one page of networks. states maps an SSID to a WIFI_STATE_* value."""
+        page = self.mapper.map_page(PAGE_WIFI_LIST)
+        rows = networks[wifi_page * WIFI_LIST_ROWS:(wifi_page + 1) * WIFI_LIST_ROWS]
+        for row in range(WIFI_LIST_ROWS):
+            if row < len(rows):
+                network = rows[row]
+                text = _wifi_text(network.ssid)
+                level = signal_level(network.signal)
+                state = states.get(network.ssid)
+                if state is None and network.in_use:
+                    state = WIFI_STATE_CONNECTED
+                if state == WIFI_STATE_CONNECTED:
+                    signal_pic = WIFI_CONNECTED_SIGNAL_PICS[level]
+                else:
+                    signal_pic = WIFI_SIGNAL_PICS[level]
+                if state is not None:
+                    icon_pic = WIFI_STATE_PICS[state]
+                else:
+                    icon_pic = WIFI_PIC_LOCKED if network.secured else WIFI_PIC_EMPTY
+            else:
+                text = ""
+                signal_pic = WIFI_PIC_EMPTY
+                icon_pic = WIFI_PIC_EMPTY
+            await self.write(f'{page}.t{row}.txt="{text}"')
+            await self.write(f"{page}.q{row}.picc={signal_pic}")
+            await self.write(f"{page}.q{row + WIFI_LIST_ROWS}.picc={icon_pic}")
+        await self.write(f"{page}.q16.picc={WIFI_SWITCH_PICS[radio_enabled]}")
+        await self.write(f'{page}.t9.txt="{_wifi_text(info_text)}"')
+
+    async def update_wifi_keyboard_ui(self, ssid):
+        page = self.mapper.map_page(PAGE_WIFI_KEYBOARD)
+        await self.write(f'{page}.t0.txt="{_wifi_text(ssid)}"')
 
     async def show_files_page(self, current_dir, dir_contents, files_page):
         page_size = 5
