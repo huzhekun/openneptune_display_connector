@@ -1098,9 +1098,11 @@ class DisplayController:
         if network.in_use:
             return
         self.wifi_selected = network
-        if network.secured:
+        if network.secured and not network.saved:
             await self._navigate_to_page(PAGE_WIFI_KEYBOARD)
         else:
+            # Saved networks reuse their stored password; the keyboard only
+            # comes up if that fails.
             await self._wifi_connect(network, None)
 
     async def _wifi_password_entered(self, password):
@@ -1122,16 +1124,24 @@ class DisplayController:
             await self._wifi_redraw_if_visible()
             try:
                 await asyncio.to_thread(connect_wifi, network.ssid, password)
+                connected = True
             except WifiError as e:
                 logger.warning(f"Wi-Fi connection to {network.ssid} failed: {e}")
+                connected = False
                 self.wifi_attempt = (network, WIFI_STATE_FAILED)
                 self.wifi_info = str(e)
                 await self._wifi_redraw_if_visible()
-                return
-            logger.info(f"Connected to Wi-Fi network {network.ssid}")
-            self.wifi_attempt = None
-            self.display.invalidate_wifi_status()
-        await self._wifi_scan()
+            if connected:
+                logger.info(f"Connected to Wi-Fi network {network.ssid}")
+                self.wifi_attempt = None
+                self.display.invalidate_wifi_status()
+        if connected:
+            await self._wifi_scan()
+        elif network.secured and password is None:
+            # The saved password didn't work: ask for a new one
+            if await self._get_current_page() == PAGE_WIFI_LIST:
+                self.wifi_selected = network
+                await self._navigate_to_page(PAGE_WIFI_KEYBOARD)
 
     async def _wifi_toggle(self):
         if self._wifi_lock.locked():

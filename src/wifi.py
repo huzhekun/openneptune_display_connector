@@ -87,6 +87,7 @@ class WifiNetwork:
     signal: int  # 0-100, as reported by NetworkManager
     secured: bool
     in_use: bool = False
+    saved: bool = False  # a NetworkManager profile exists for this SSID
 
 
 class WifiError(Exception):
@@ -197,6 +198,7 @@ def _describe_nmcli_error(message):
 
 
 def scan_wifi_networks(rescan=True):
+    saved = _wifi_profiles()
     output = _run_nmcli(
         [
             "-t",
@@ -211,25 +213,28 @@ def scan_wifi_networks(rescan=True):
             "yes" if rescan else "no",
         ]
     )
-    return parse_wifi_list(output)
+    networks = parse_wifi_list(output)
+    for network in networks:
+        network.saved = network.ssid in saved
+    return networks
 
 
-def _find_wifi_profile(ssid):
-    """Return the UUID of a saved Wi-Fi connection profile for this SSID."""
+def _wifi_profiles():
+    """Map SSID -> UUID for the saved Wi-Fi connection profiles."""
+    profiles = {}
     output = _run_nmcli(["-t", "-f", "UUID,TYPE", "connection", "show"])
     for line in output.splitlines():
         fields = split_terse_line(line)
         if len(fields) < 2 or fields[1] != "802-11-wireless":
             continue
         uuid = fields[0]
-        profile_ssid = split_terse_line(
+        ssid = split_terse_line(
             _run_nmcli(
                 ["-g", "802-11-wireless.ssid", "connection", "show", "uuid", uuid]
             ).rstrip("\n")
         )[0]
-        if profile_ssid == ssid:
-            return uuid
-    return None
+        profiles.setdefault(ssid, uuid)
+    return profiles
 
 
 def connect_wifi(ssid, password=None):
@@ -239,7 +244,7 @@ def connect_wifi(ssid, password=None):
     new one is given) so repeated attempts don't pile up duplicate profiles."""
     wait = ["--wait", str(NMCLI_CONNECT_TIMEOUT)]
     timeout = NMCLI_CONNECT_TIMEOUT + 15
-    uuid = _find_wifi_profile(ssid)
+    uuid = _wifi_profiles().get(ssid)
     if uuid is not None:
         if password:
             _run_nmcli(["connection", "modify", "uuid", uuid, "wifi-sec.psk", password])
