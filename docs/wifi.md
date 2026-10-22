@@ -87,7 +87,9 @@ percent as `2 * (dBm + 100)`, so the connector uses 90 / 44 / 22 %.
    `SCAN` / `SCAN_RESULTS` over `wpa_supplicant`'s control socket. Up to 48
    networks (6 pages of 8). The connected network is moved to the top.
 2. An open network is joined straight away. A secured one (`WPA` in the scan
-   flags) opens `keybdA` with the SSID written to `t0`.
+   flags) opens `keybdA` with the SSID written to `t0`. (The connector also
+   joins saved networks straight away and only asks for a password if the
+   stored one fails.)
 3. On OK: `SET_NETWORK 0 ssid/psk`, `key_mgmt WPA-PSK`, `SELECT_NETWORK 0`,
    `REASSOCIATE`, then poll `STATUS` every 2 s: `COMPLETED` with an IP means
    success (`SAVE_CONFIG`, rescan); `INACTIVE`, repeated `SCANNING` or a stuck
@@ -110,9 +112,10 @@ percent as `2 * (dBm + 100)`, so the connector uses 90 / 44 / 22 %.
   list with a connecting / failed icon and the error in `t9`.
 * `wifi-permissions-setup.sh`: `display.service` runs as `mks` with
   `NoNewPrivileges=true`, so `sudo` is unavailable. The script installs a
-  polkit rule that lets that user perform NetworkManager actions (and only
-  those). Both the installer and `display.service` (as a best-effort
-  `ExecStartPre`) run it.
+  polkit rule that grants NetworkManager actions (and only those) to that
+  user's processes inside `display.service`, checked through
+  `/proc/<pid>/cgroup` the same way Moonraker's rule checks a group. Both the
+  installer and `display.service` (as a best-effort `ExecStartPre`) run it.
 
 The OpenNeptune (Slate) theme keeps the stock `wifi_list` and `keybdA` pages,
 but its settings page has no WLAN entry, so Wi-Fi isn't reachable there yet.
@@ -175,8 +178,10 @@ restart the service. The polkit rule can stay or be removed from
 ## Testing on a printer
 
 1. Install the branch as above.
-2. Check the permission rule took effect:
-   `sudo -u mks nmcli device wifi rescan` should succeed without a prompt.
+2. The permission rule only applies inside `display.service`, so a shell as
+   `mks` still gets `auth` from `nmcli general permissions`. Check that
+   `/etc/polkit-1/rules.d/50-display-connector-networkmanager.rules` exists;
+   if the rule is missing, the list shows "Permission denied".
 3. Settings → WLAN should show the loading animation, then the list.
 4. Watch the log while tapping around: `journalctl -u display -f`. Taps that
    aren't handled show up as `Unhandled Response <page> <component>`.
