@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from src.tjc import EventType
-from src.response_actions import response_actions, input_actions, custom_touch_actions
+from src.response_actions import response_actions, input_actions, custom_touch_actions, named_response_actions
 from src.lib_col_pic import parse_thumbnail
 from src.communicator import DisplayCommunicator
 from src.neptune4 import (
@@ -37,6 +37,19 @@ from src.neptune4 import (
 )
 from src.elegoo_neptune3 import MODELS_N3, ElegooNeptune3DisplayCommunicator, OpenNeptune3DisplayCommunicator
 from src.elegoo_custom import MODEL_CUSTOM, CustomDisplayCommunicator
+from src.elegoo_display import (
+    WIFI_LIST_ROWS,
+    WIFI_STATE_CONNECTING,
+    WIFI_STATE_FAILED,
+)
+from src.wifi import (
+    WifiError,
+    connect_wifi,
+    get_wlan0_ip,
+    is_wifi_radio_enabled,
+    scan_wifi_networks,
+    set_wifi_radio,
+)
 from src.mapping import (
     build_format_filename,
     filename_regex_wrapper,
@@ -61,6 +74,8 @@ from src.mapping import (
     PAGE_PRINTING_SPEED,
     PAGE_PRINTING_ADJUST,
     PAGE_OVERLAY_LOADING,
+    PAGE_WIFI_LIST,
+    PAGE_WIFI_KEYBOARD,
     format_time,
 )
 from src.colors import BACKGROUND_SUCCESS, BACKGROUND_WARNING
@@ -317,6 +332,14 @@ class DisplayController:
         self._page_check_lock = asyncio.Lock()
 
         self._http_session = None
+        self.wifi_networks = []
+        self.wifi_page = 0
+        self.wifi_selected = None
+        # (WifiNetwork, WIFI_STATE_*) of the last connection attempt, shown first
+        self.wifi_attempt = None
+        self.wifi_radio_enabled = True
+        self.wifi_info = ""
+        self._wifi_lock = asyncio.Lock()
 
 
     def pathname2url(self, path):
@@ -475,6 +498,11 @@ class DisplayController:
             if not self._rapid_scan_mode:                                                       
                 await self.display.draw_kamp_page(self.bed_leveling_counts)
             return  
+        elif current_page == PAGE_WIFI_LIST:
+            await self._wifi_draw()
+        elif current_page == PAGE_WIFI_KEYBOARD:
+            if self.wifi_selected is not None:
+                await self.display.update_wifi_keyboard_ui(self.wifi_selected.ssid)
 
         await self.display.special_page_handling(current_page)
 
@@ -646,6 +674,18 @@ class DisplayController:
         elif action == "files_picker":
             self._loop.create_task(self._navigate_to_page(PAGE_FILES))
             self._loop.create_task(self._load_files())
+        elif action == "wifi_open":
+            self._loop.create_task(self._wifi_open())
+        elif action == "wifi_scan":
+            self._loop.create_task(self._wifi_scan())
+        elif action.startswith("wifi_select_"):
+            self._loop.create_task(self._wifi_select(int(action.split("_")[2])))
+        elif action == "wifi_page_prev":
+            self._loop.create_task(self._wifi_change_page(-1))
+        elif action == "wifi_page_next":
+            self._loop.create_task(self._wifi_change_page(1))
+        elif action == "wifi_toggle":
+            self._loop.create_task(self._wifi_toggle())
 
         elif action.startswith("temp_heater_"):
             parts = action.split("_")
@@ -1007,6 +1047,151 @@ class DisplayController:
     def _toggle_fan(self, state):
         gcode = f"M106 S{'255' if state else '0'}"
         self.send_gcode(gcode)
+
+    def _wifi_visible_networks(self):
+        """Scan results with the last connection attempt pinned to the top."""
+        if self.wifi_attempt is None:
+            return self.wifi_networks
+        attempted = self.wifi_attempt[0]
+        others = [n for n in self.wifi_networks if n.ssid != attempted.ssid]
+        return [attempted, *others]
+
+    def _wifi_page_count(self):
+        return max(1, ceil(len(self._wifi_visible_networks()) / WIFI_LIST_ROWS))
+
+    async def _wifi_draw(self):
+        states = {}
+        if self.wifi_attempt is not None:
+            states[self.wifi_attempt[0].ssid] = self.wifi_attempt[1]
+        await self.display.update_wifi_list_ui(
+            self._wifi_visible_networks(),
+            self.wifi_page,
+            states,
+            self.wifi_radio_enabled,
+            self.wifi_info,
+        )
+
+    async def _wifi_redraw_if_visible(self):
+        if await self._get_current_page() == PAGE_WIFI_LIST:
+            await self._wifi_draw()
+
+    async def _wifi_connection_info(self):
+        ip = await asyncio.to_thread(get_wlan0_ip)
+        return f"IP:{ip}" if ip else "Not connected"
+
+    async def _wifi_open(self):
+        self.wifi_page = 0
+        self.wifi_attempt = None
+        await self._wifi_scan()
+
+    async def _wifi_scan(self):
+        if self._wifi_lock.locked():
+            return
+        async with self._wifi_lock:
+            await self._navigate_to_page(PAGE_OVERLAY_LOADING)
+            try:
+                self.wifi_radio_enabled = await asyncio.to_thread(is_wifi_radio_enabled)
+                if self.wifi_radio_enabled:
+                    self.wifi_networks = await asyncio.to_thread(scan_wifi_networks)
+                    self.wifi_info = await self._wifi_connection_info()
+                else:
+                    self.wifi_networks = []
+                    self.wifi_info = "Wi-Fi off"
+            except WifiError as e:
+                logger.warning(f"Wi-Fi scan failed: {e}")
+                self.wifi_networks = []
+                self.wifi_info = str(e)
+            self.wifi_page = min(self.wifi_page, self._wifi_page_count() - 1)
+
+        # Leave the loading overlay. If it sits on top of the list, going back
+        # redraws the list; if the user already left, leave them where they are.
+        async with self._history_lock:
+            current_page = self.history[-1] if self.history else None
+            below = self.history[-2] if len(self.history) > 1 else None
+        if current_page == PAGE_OVERLAY_LOADING:
+            if below == PAGE_WIFI_LIST:
+                await self._go_back()
+            else:
+                await self._navigate_to_page(PAGE_WIFI_LIST)
+        elif current_page == PAGE_WIFI_LIST:
+            await self._wifi_draw()
+
+    async def _wifi_change_page(self, delta):
+        new_page = self.wifi_page + delta
+        if 0 <= new_page < self._wifi_page_count():
+            self.wifi_page = new_page
+            await self._wifi_draw()
+
+    async def _wifi_select(self, row):
+        if self._wifi_lock.locked():
+            return
+        networks = self._wifi_visible_networks()
+        index = self.wifi_page * WIFI_LIST_ROWS + row
+        if index >= len(networks):
+            return
+        network = networks[index]
+        if network.in_use:
+            return
+        self.wifi_selected = network
+        if network.secured:
+            await self._navigate_to_page(PAGE_WIFI_KEYBOARD)
+        else:
+            await self._wifi_connect(network, None)
+
+    async def _wifi_password_entered(self, password):
+        if await self._get_current_page() != PAGE_WIFI_KEYBOARD or self.wifi_selected is None:
+            logger.info("Ignoring keyboard input outside of the Wi-Fi password page")
+            return
+        network = self.wifi_selected
+        await self._go_back()
+        await self._wifi_connect(network, password)
+
+    async def _wifi_connect(self, network, password):
+        if self._wifi_lock.locked():
+            return
+        async with self._wifi_lock:
+            logger.info(f"Connecting to Wi-Fi network {network.ssid}")
+            self.wifi_page = 0
+            self.wifi_attempt = (network, WIFI_STATE_CONNECTING)
+            self.wifi_info = "Connecting..."
+            await self._wifi_redraw_if_visible()
+            try:
+                await asyncio.to_thread(connect_wifi, network.ssid, password)
+            except WifiError as e:
+                logger.warning(f"Wi-Fi connection to {network.ssid} failed: {e}")
+                self.wifi_attempt = (network, WIFI_STATE_FAILED)
+                self.wifi_info = str(e)
+                await self._wifi_redraw_if_visible()
+                return
+            logger.info(f"Connected to Wi-Fi network {network.ssid}")
+            self.wifi_attempt = None
+            self.display.invalidate_wifi_status()
+        await self._wifi_scan()
+
+    async def _wifi_toggle(self):
+        if self._wifi_lock.locked():
+            return
+        async with self._wifi_lock:
+            enabled = not self.wifi_radio_enabled
+            try:
+                await asyncio.to_thread(set_wifi_radio, enabled)
+            except WifiError as e:
+                logger.warning(f"Switching Wi-Fi {'on' if enabled else 'off'} failed: {e}")
+                self.wifi_info = str(e)
+                await self._wifi_redraw_if_visible()
+                return
+            self.wifi_radio_enabled = enabled
+            self.wifi_attempt = None
+            self.display.invalidate_wifi_status()
+            if not enabled:
+                self.wifi_networks = []
+                self.wifi_page = 0
+                self.wifi_info = "Wi-Fi off"
+                await self._wifi_redraw_if_visible()
+                return
+        # Give the radio a moment to come up before scanning
+        await asyncio.sleep(3)
+        await self._wifi_scan()
 
     def _build_path(self, *components):
         path = ""
@@ -1454,6 +1639,11 @@ class DisplayController:
         return msg
 
     def handle_response(self, page, component):
+        current_page = self.history[-1] if self.history else None
+        named_actions = named_response_actions.get(self._page_id(current_page), {})
+        if component in named_actions:
+            self.execute_action(named_actions[component])
+            return
         if page in response_actions:
             if component in response_actions[page]:
                 self.execute_action(response_actions[page][component])
@@ -1499,6 +1689,9 @@ class DisplayController:
             self.handle_input(data.page_id, data.component_id, data.value)
         elif type == EventType.NUMERIC_INPUT:
             self.handle_input(data.page_id, data.component_id, data.value)
+        elif type == EventType.KEYBOARD_INPUT:
+            # Never log data here: it carries the Wi-Fi password
+            await self._wifi_password_entered(data.string)
         elif type == EventType.RECONNECTED:
             logger.info("Reconnected to Display")
             # Re-enable touch coordinate reporting; the panel forgets this

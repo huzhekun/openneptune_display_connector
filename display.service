@@ -13,6 +13,8 @@ WorkingDirectory=/home/mks/display_connector
 # can apply updated unit files without re-running the installer manually.
 ExecStartPre=+/usr/bin/install -m 0644 /home/mks/display_connector/display.service /etc/systemd/system/display.service
 ExecStartPre=+/bin/systemctl daemon-reload
+# Let the connector manage Wi-Fi via NetworkManager (best effort: never block startup)
+ExecStartPre=-+/bin/sh /home/mks/display_connector/wifi-permissions-setup.sh mks
 ExecStartPre=/bin/sleep 10
 ExecStart=/home/mks/display_connector/venv/bin/python /home/mks/display_connector/display.py
 

@@ -253,6 +253,39 @@ input_actions = {
     },
 }
 
+# Pages whose numeric id differs between display firmware versions. These are
+# keyed by HMI page name and matched against the page the connector is showing.
+named_response_actions = {
+    # Settings (Neptune 4 Plus/Max)
+    "set_4_max": {
+        1: "page " + PAGE_SETTINGS_LANGUAGE,
+        2: "wifi_open",
+        3: "page " + PAGE_LIGHTS,
+        4: "toggle_fan",
+        5: "printer.send_gcode('M84')",
+        6: "toggle_filament_sensor",
+        # Factory Settings on stock firmware, relabelled to Temperature Settings
+        7: "page " + PAGE_SETTINGS_TEMPERATURE,
+        8: "page " + PAGE_SETTINGS_ABOUT,
+        9: "page " + PAGE_SETTINGS_ADVANCED,
+    },
+    # Wi-Fi network list
+    "wifi_list": {
+        1: "wifi_select_0",
+        2: "wifi_select_1",
+        3: "wifi_select_2",
+        4: "wifi_select_3",
+        5: "wifi_select_4",
+        6: "wifi_select_5",
+        7: "wifi_select_6",
+        8: "wifi_select_7",
+        9: "wifi_scan",
+        10: "wifi_page_prev",
+        11: "wifi_page_next",
+        12: "wifi_toggle",
+    },
+}
+
 custom_touch_actions = {
     "main": {
         (200, 0, 260, 50): "page " + PAGE_SHUTDOWN_DIALOG,
