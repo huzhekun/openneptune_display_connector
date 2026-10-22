@@ -34,3 +34,8 @@ async def test_navigate(communicator):
         blocked_key="__nav__",
         auto_unblock=False,
     )
+
+
+def test_display_encodes_utf8(communicator):
+    # nextion encodes every command with this; ASCII rejects "°" in temperatures
+    assert communicator.display._encoding == "utf-8"

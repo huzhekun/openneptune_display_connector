@@ -31,9 +31,9 @@ class DisplayCommunicator:
         # ADD: Lock for write operations
         self._write_lock = asyncio.Lock()
 
-        # Ensure TJCClient is properly instantiated
-        self.display = TJCClient(port, baudrate, event_handler)
-        self.display.encoding = "utf-8"
+        # Ensure TJCClient is properly instantiated. The HMI's text is UTF-8;
+        # nextion defaults to ASCII and drops any write containing e.g. "°".
+        self.display = TJCClient(port, baudrate, event_handler, encoding="utf-8")
 
     async def connect(self):
         try:
