@@ -97,6 +97,20 @@ def test_connect_reuses_saved_profile():
     ]
 
 
+def test_scan_marks_saved_networks():
+    run = MagicMock(
+        side_effect=[
+            completed("u-home:802-11-wireless\n"),
+            completed("Home\n"),
+            completed("*:Home:70:WPA2\n :Other:40:WPA2\n"),
+        ]
+    )
+    with patch.object(wifi.subprocess, "run", run):
+        networks = wifi.scan_wifi_networks()
+    assert [(n.ssid, n.saved) for n in networks] == [("Home", True), ("Other", False)]
+    assert run.call_args_list[2].args[0][-2:] == ["--rescan", "yes"]
+
+
 def test_connect_open_network_has_no_password():
     run = MagicMock(side_effect=[completed(""), completed()])
     with patch.object(wifi.subprocess, "run", run):
