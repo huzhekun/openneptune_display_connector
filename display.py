@@ -78,9 +78,11 @@ from src.mapping import (
     PAGE_WIFI_LIST,
     PAGE_WIFI_KEYBOARD,
     PAGE_CONTINUE_PRINT,
+    PAGE_SETTINGS_ADVANCED,
     format_time,
 )
 from src.colors import BACKGROUND_SUCCESS, BACKGROUND_WARNING
+from src import power_loss
 
 # Global flag for graceful shutdown
 _shutdown_requested = False
@@ -530,6 +532,8 @@ class DisplayController:
             else:
                 text = macro.get("filename", "")
             await self.display.update_continue_print_ui(text)
+        elif current_page == PAGE_SETTINGS_ADVANCED:
+            await self.display.update_plr_setting_ui(power_loss.recovery_enabled())
 
         await self.display.special_page_handling(current_page)
 
@@ -721,6 +725,10 @@ class DisplayController:
         elif action == "plr_discard":
             self.send_gcode("PLR_DISCARD")
             self._loop.create_task(self._navigate_to_page(PAGE_MAIN, clear_history=True))
+        elif action == "plr_toggle":
+            enabled = power_loss.toggle_recovery()
+            logger.info(f"Power-loss recovery turned {'on' if enabled else 'off'}")
+            self._loop.create_task(self.display.update_plr_setting_ui(enabled))
 
         elif action.startswith("temp_heater_"):
             parts = action.split("_")
