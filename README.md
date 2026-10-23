@@ -11,8 +11,8 @@ Allows you to use the Touch screen from your neptune 3 or 4 printer with a stock
 
 This is a fork of [OpenNeptune3D/display_connector](https://github.com/OpenNeptune3D/display_connector),
 used with [huzhekun/OpenNept4une](https://github.com/huzhekun/OpenNept4une)
-on two Neptune 4 Max with the stock Elegoo screen firmware 1.2.22. It
-includes upstream's `dev` branch (up to 3272efe, 2026-10-09) and adds:
+and tested on the Neptune 4 Max with the stock Elegoo screen firmware 1.2.22.
+It includes upstream's `dev` branch (up to 3272efe, 2026-10-09) and adds:
 
 - **On-screen Wi-Fi setup** on the Neptune 4 Plus/Max ([docs/wifi.md](docs/wifi.md)).
 - **Power-loss recovery** for OpenNept4une's resume after a power cut: the
