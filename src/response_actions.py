@@ -269,6 +269,11 @@ named_response_actions = {
         8: "page " + PAGE_SETTINGS_ABOUT,
         9: "page " + PAGE_SETTINGS_ADVANCED,
     },
+    # Power-loss recovery prompt (OpenNept4une PLR_RESUME / PLR_DISCARD macros)
+    "continueprint": {
+        0: "plr_resume",
+        1: "plr_discard",
+    },
     # Wi-Fi network list
     "wifi_list": {
         1: "wifi_select_0",

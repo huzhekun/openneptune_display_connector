@@ -39,6 +39,7 @@ from src.mapping import (
     PAGE_WIFI_LIST,
     PAGE_WIFI_KEYBOARD,
     PAGE_LIGHTS,
+    PAGE_CONTINUE_PRINT,
     PAGE_SHUTDOWN_DIALOG,
     format_temp,
     format_time,
@@ -114,6 +115,7 @@ class ElegooDisplayMapper(Mapper):
         PAGE_WIFI_LIST: "wifi_list",
         PAGE_WIFI_KEYBOARD: "keybdA",
         PAGE_LIGHTS: "led",
+        PAGE_CONTINUE_PRINT: "continueprint",
     }
 
     def __init__(self) -> None:
@@ -646,6 +648,12 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
     async def update_wifi_keyboard_ui(self, ssid):
         page = self.mapper.map_page(PAGE_WIFI_KEYBOARD)
         await self.write(f'{page}.t0.txt="{_wifi_text(ssid)}"')
+
+    async def update_continue_print_ui(self, text):
+        page = self.mapper.map_page(PAGE_CONTINUE_PRINT)
+        text = text.replace('"', "'").replace("\\", "/")
+        text = text.encode("utf-8")[:127].decode("utf-8", "ignore")
+        await self.write(f'{page}.t0.txt="{text}"')
 
     async def show_files_page(self, current_dir, dir_contents, files_page):
         page_size = 5
