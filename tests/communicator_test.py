@@ -34,3 +34,27 @@ async def test_navigate(communicator):
         blocked_key="__nav__",
         auto_unblock=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_sleep_drops_writes_until_a_page_change(communicator):
+    communicator.display.command = AsyncMock()
+    woke = []
+    communicator.on_wake = lambda: woke.append(True)
+    await communicator.sleep()
+    assert communicator.sleeping
+    # The panel ignores these while it sleeps
+    await communicator.write('main.nozzletemp.txt="210"')
+    # Changing the page wakes it first
+    await communicator.write("page main")
+    sent = [c.args[0] for c in communicator.display.command.call_args_list]
+    assert sent == ["sleep=1", "sleep=0", "dim=multiset.h0.val", "page main"]
+    assert not communicator.sleeping
+    assert woke == [True]
+
+
+@pytest.mark.asyncio
+async def test_wake_when_awake_does_nothing(communicator):
+    communicator.display.command = AsyncMock()
+    await communicator.wake()
+    communicator.display.command.assert_not_awaited()

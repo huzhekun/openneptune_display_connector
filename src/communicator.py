@@ -29,6 +29,12 @@ class DisplayCommunicator:
         self.blocked_buffer = deque()
         self.ips = "--"
 
+        # While the panel sleeps (backlight off) it ignores commands without
+        # replying, so they're dropped, and on_wake is called when it wakes to
+        # redraw the page
+        self.sleeping = False
+        self.on_wake = None
+
         self._write_lock = asyncio.Lock()  # guards queue/block state only
         self._serial_lock = asyncio.Lock()  # serialises actual serial I/O
         # Serialises concurrent navigate_to() calls: same blocked_key bypass in write()
@@ -51,6 +57,11 @@ class DisplayCommunicator:
 
     async def _execute_command(self, data, timeout=None):
         """Execute a display command directly without queueing logic."""
+        if self.sleeping:
+            if not data.startswith("page "):
+                return
+            # Changing the page is worth waking the panel for
+            await self._wake()
         try:
             effective_timeout = self.timeout if timeout is None else timeout
             await asyncio.wait_for(
@@ -74,6 +85,28 @@ class DisplayCommunicator:
         except Exception as e:
             # Any other error: log and continue
             self.logger.warning(f"Unexpected error writing to display: {e}")
+
+    async def sleep(self):
+        async with self._serial_lock:
+            if self.sleeping:
+                return
+            await self._execute_command("sleep=1")
+            self.sleeping = True
+
+    async def wake(self):
+        """Wake the panel, or note that it woke up on a touch."""
+        async with self._serial_lock:
+            await self._wake()
+
+    async def _wake(self):
+        if not self.sleeping:
+            return
+        self.sleeping = False
+        await self._execute_command("sleep=0")
+        # The firmware may have dimmed the backlight before the panel slept
+        await self._execute_command("dim=multiset.h0.val")
+        if self.on_wake:
+            self.on_wake()
 
     async def write(self, data, timeout=None, blocked_key=None, auto_unblock=True):
         # Fast path: decide blocking under lock
