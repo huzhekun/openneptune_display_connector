@@ -75,6 +75,7 @@ from src.mapping import (
     PAGE_OVERLAY_LOADING,
     PAGE_WIFI_LIST,
     PAGE_WIFI_KEYBOARD,
+    PAGE_CONTINUE_PRINT,
     format_time,
 )
 from src.colors import BACKGROUND_SUCCESS, BACKGROUND_WARNING
@@ -316,6 +317,11 @@ class DisplayController:
         self.wifi_info = ""
         self._wifi_lock = asyncio.Lock()
 
+        # Power-loss recovery: the PLR_RESUME macro, save_variables and
+        # print_stats as last reported, and the checkpoint already offered
+        self.plr_status = {}
+        self.plr_offered = None
+
 
     def pathname2url(self, path):
         return quote(path.replace("\\", "/"))
@@ -478,6 +484,13 @@ class DisplayController:
         elif current_page == PAGE_WIFI_KEYBOARD:
             if self.wifi_selected is not None:
                 await self.display.update_wifi_keyboard_ui(self.wifi_selected.ssid)
+        elif current_page == PAGE_CONTINUE_PRINT:
+            macro = self.plr_status.get("gcode_macro PLR_RESUME", {})
+            if macro.get("error"):
+                text = "Can't resume: " + macro["error"]
+            else:
+                text = macro.get("filename", "")
+            await self.display.update_continue_print_ui(text)
 
         await self.display.special_page_handling(current_page)
 
@@ -651,6 +664,13 @@ class DisplayController:
             self._loop.create_task(self._wifi_change_page(1))
         elif action == "wifi_toggle":
             self._loop.create_task(self._wifi_toggle())
+        elif action == "plr_resume":
+            if not self.plr_status.get("gcode_macro PLR_RESUME", {}).get("error"):
+                self.send_gcode("PLR_RESUME")
+            self._loop.create_task(self._navigate_to_page(PAGE_MAIN, clear_history=True))
+        elif action == "plr_discard":
+            self.send_gcode("PLR_DISCARD")
+            self._loop.create_task(self._navigate_to_page(PAGE_MAIN, clear_history=True))
 
         elif action.startswith("temp_heater_"):
             parts = action.split("_")
@@ -1382,6 +1402,8 @@ class DisplayController:
                             "output_pin Frame_Light": ["value"],
                             "configfile": ["config"],
                             f"filament_switch_sensor {self.filament_sensor_name}": ["enabled"],
+                            "gcode_macro PLR_RESUME": ["checkpoint", "filename", "error"],
+                            "save_variables": ["variables"],
                         }
                     },
                 )
@@ -2135,6 +2157,25 @@ class DisplayController:
             logger.warning(f"Error calculating remaining time: {e}")
 
         self._update_misc_states(new_data, data_mapping)
+        await self._offer_power_loss_recovery(new_data)
+
+    async def _offer_power_loss_recovery(self, new_data):
+        """Show the continue-print prompt once for a print interrupted by a
+        power cut. OpenNept4une's plr.py defines PLR_RESUME at boot when there
+        is one; it's handled once save_variables has its checkpoint id."""
+        for key in ("gcode_macro PLR_RESUME", "save_variables", "print_stats"):
+            if key in new_data:
+                self.plr_status.setdefault(key, {}).update(new_data[key])
+        checkpoint = self.plr_status.get("gcode_macro PLR_RESUME", {}).get("checkpoint")
+        if not checkpoint or checkpoint == self.plr_offered or self._page_id(PAGE_CONTINUE_PRINT) is None:
+            return
+        handled = self.plr_status.get("save_variables", {}).get("variables", {}).get("plr_handled")
+        state = self.plr_status.get("print_stats", {}).get("state")
+        if handled == checkpoint or state in ("printing", "paused"):
+            return
+        self.plr_offered = checkpoint
+        logger.info(f"Offering to resume the print interrupted by a power cut (checkpoint {checkpoint})")
+        await self._navigate_to_page(PAGE_CONTINUE_PRINT)
 
     def _update_misc_states(self, new_data, data_mapping):
         # Handle other updates: lights, fans, filament sensor, etc.

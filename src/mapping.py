@@ -43,6 +43,8 @@ PAGE_WIFI_KEYBOARD = "wifi_keyboard"
 
 PAGE_LIGHTS = "lights"
 
+PAGE_CONTINUE_PRINT = "continue_print"
+
 
 def format_temp(value):
     if value is None:

@@ -36,6 +36,7 @@ from src.mapping import (
     PAGE_WIFI_LIST,
     PAGE_WIFI_KEYBOARD,
     PAGE_LIGHTS,
+    PAGE_CONTINUE_PRINT,
     PAGE_SHUTDOWN_DIALOG,
     format_temp,
     format_time,
@@ -82,6 +83,7 @@ class OpenNeptuneDisplayMapper(Mapper):
         PAGE_WIFI_LIST: "wifi_list",
         PAGE_WIFI_KEYBOARD: "keybdA",
         PAGE_LIGHTS: "led",
+        PAGE_CONTINUE_PRINT: "continueprint",
     }
 
     def __init__(self) -> None:
