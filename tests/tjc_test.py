@@ -134,3 +134,14 @@ def test_event_slider():
     client._schedule_event_message_handler = m
     client.event_message_handler(b"\x72\x03\x16\x10\x09")
     m.assert_called_once_with(EventType.NUMERIC_INPUT, TJCNumericInputPayload(page_id=3, component_id=22, value=2320))
+
+
+def test_sleep_events_are_passed_on():
+    client = TJCClient("/dev/null", 115200, None)
+    events = []
+    client._schedule_event_message_handler = lambda t, d: events.append((t, d))
+    client.event_message_handler(bytes([0x68, 0, 0x81, 0, 0xF5, 1]))
+    client.event_message_handler(bytes([0x86]))
+    client.event_message_handler(bytes([0x87]))
+    assert events == [(EventType.TOUCH_IN_SLEEP, None), (EventType.AUTO_SLEEP, None),
+                      (EventType.AUTO_WAKE, None)]

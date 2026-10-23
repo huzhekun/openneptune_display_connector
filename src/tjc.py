@@ -194,6 +194,10 @@ class TJCClient(Nextion):
                 EventType.SLIDER_INPUT: ("BBH", TJCNumericInputPayload),
             }
 
+            if event_type in (EventType.TOUCH_IN_SLEEP, EventType.AUTO_SLEEP, EventType.AUTO_WAKE):
+                self._schedule_event_message_handler(event_type, None)
+                return
+
             if event_type in payload_map:
                 format_str, payload_type = payload_map[event_type]
                 payload_length = struct.calcsize(format_str)

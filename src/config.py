@@ -71,6 +71,14 @@ class ConfigHandler(ConfigParser):
             self.add_section("print_screen")
             self.set("print_screen", "z_display", "mm")
 
+            self.add_section("screen_sleep")
+            self.set(
+                "screen_sleep",
+                "; minutes without activity before the screen turns off, while idle and during a print. 0 = never.",
+            )
+            self.set("screen_sleep", "idle_timeout", "20")
+            self.set("screen_sleep", "print_timeout", "0")
+
             self.add_section("thumbnails")
             self.set(
                 "main_screen",

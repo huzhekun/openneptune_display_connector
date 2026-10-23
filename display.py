@@ -1,3 +1,4 @@
+import copy
 import json
 import sys
 import logging
@@ -144,6 +145,15 @@ TRANSITION_PAGES = [PAGE_OVERLAY_LOADING]
 
 SUPPORTED_PRINTERS = [MODEL_N4_REGULAR, MODEL_N4_PRO, MODEL_N4_PLUS, MODEL_N4_MAX]
 
+def _merge_status(into, new):
+    """Merge a Moonraker status update into the full status."""
+    for key, value in new.items():
+        if isinstance(value, dict) and isinstance(into.get(key), dict):
+            _merge_status(into[key], value)
+        else:
+            into[key] = copy.deepcopy(value)
+
+
 def get_communicator(display, model) -> DisplayCommunicator:
     # Normalize display name to avoid None/whitespace/case issues
     disp = (display or "").strip().lower()
@@ -228,6 +238,10 @@ class DisplayController:
             port=self.config.safe_get("general", "serial_port"),
         )
         self._handle_display_config()
+        self._last_activity = time.monotonic()
+        self._status_snapshot = {}
+        self._sleep_task = None
+        self.display.on_wake = self._on_display_wake
 
         self._filename_lock = asyncio.Lock()
         self.current_filename = None
@@ -362,6 +376,14 @@ class DisplayController:
             self.z_move_speed = prepare.getint("z_move_speed", fallback=10)
             self.extrude_amount = prepare.getint("extrude_amount", fallback=50)
             self.extrude_speed = prepare.getint("extrude_speed", fallback=300)
+        # Minutes without activity before the screen sleeps, while idle and
+        # during a print (0 = never)
+        self.sleep_timeout = 20
+        self.print_sleep_timeout = 0
+        if "screen_sleep" in self.config:
+            screen_sleep = self.config["screen_sleep"]
+            self.sleep_timeout = screen_sleep.getint("idle_timeout", fallback=20)
+            self.print_sleep_timeout = screen_sleep.getint("print_timeout", fallback=0)
 
     def _handle_display_config(self):
         self.display.mapper.set_filament_sensor_name(self.filament_sensor_name)
@@ -514,6 +536,7 @@ class DisplayController:
 
     async def _navigate_to_page(self, page, clear_history=False):
         """Navigate to a page without holding locks during I/O operations."""
+        self._screen_activity()
         
         # Cancel any pending thumbnail task when navigating (outside lock)
         if self._thumbnail_task and not self._thumbnail_task.done():
@@ -1367,9 +1390,12 @@ class DisplayController:
             try:
                 await self.display.connect()
                 await self.display.check_valid_version()
+                await self.display.write("thup=1")  # a touch wakes the screen
             except Exception as e:
                 logger.error(f"Failed to connect to display: {e}")
                 raise
+            if self._sleep_task is None or self._sleep_task.done():
+                self._sleep_task = self._loop.create_task(self._screen_sleep_loop())
             
             # Connect to Moonraker
             try:
@@ -1651,8 +1677,58 @@ class DisplayController:
                     self.execute_action(actions[key])
                     return
 
+    def _screen_activity(self):
+        self._last_activity = time.monotonic()
+
+    async def _screen_sleep_loop(self):
+        """Turn the screen off after the configured minutes without activity.
+
+        Touches, page changes and print state changes count as activity, the
+        temperatures and other values updated on the screen don't.
+        """
+        while True:
+            await asyncio.sleep(10)
+            try:
+                printing = self.current_state in ("printing", "paused")
+                timeout = self.print_sleep_timeout if printing else self.sleep_timeout
+                if self.display.sleeping or not timeout:
+                    continue
+                if time.monotonic() - self._last_activity < timeout * 60:
+                    continue
+                # Turning off the screen's own dimming (Backlight in the
+                # advanced settings) turns this off too
+                if await self.display.display.get("en_dim") == 0:
+                    continue
+                logger.info(f"No activity for {timeout} minutes, turning the screen off")
+                await self.display.sleep()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug(f"Screen sleep check failed: {e}")
+
+    def _on_display_wake(self):
+        self._screen_activity()
+        self._loop.create_task(self._refresh_after_wake())
+
+    async def _refresh_after_wake(self):
+        """Send the status again: the screen ignored it while it slept."""
+        status = copy.deepcopy(self._status_snapshot)
+        # A state is handled as a change of state, which can switch pages
+        status.get("print_stats", {}).pop("state", None)
+        try:
+            await self.handle_status_update(status)
+        except Exception as e:
+            logger.debug(f"Refreshing the screen after waking failed: {e}")
+
     async def display_event_handler(self, type, data):
-        if type == EventType.TOUCH:
+        if type not in (EventType.AUTO_SLEEP, EventType.RECONNECTED):
+            self._screen_activity()
+        if type in (EventType.AUTO_WAKE, EventType.TOUCH_IN_SLEEP):
+            # A touch woke the panel up
+            await self.display.wake()
+        elif type == EventType.AUTO_SLEEP:
+            self.display.sleeping = True
+        elif type == EventType.TOUCH:
             self.handle_response(data.page_id, data.component_id)
         elif type == EventType.TOUCH_COORDINATE:
             if data.touch_event == 0:
@@ -1666,6 +1742,10 @@ class DisplayController:
             await self._wifi_password_entered(data.string)
         elif type == EventType.RECONNECTED:
             logger.info("Reconnected to Display")
+            # Reconnecting wakes the panel
+            self.display.sleeping = False
+            self._screen_activity()
+            await self.display.write("thup=1")
             # Clear history so we don't fight with a stale page stack
             async with self._history_lock:
                 self.history = []
@@ -1993,6 +2073,8 @@ class DisplayController:
     async def handle_status_update(self, new_data, data_mapping=None):
         if data_mapping is None:
             data_mapping = self.display.mapper.data_mapping
+        if data_mapping is self.display.mapper.data_mapping:
+            _merge_status(self._status_snapshot, new_data)
         
         # RATE LIMITING: Only check page max once per second
         if not hasattr(self, '_last_page_check_time'):
@@ -2048,6 +2130,10 @@ class DisplayController:
                     new_data["print_stats"]["filename"] = self.current_filename
 
                 state = new_data["print_stats"].get("state")
+                if state and state != self.current_state:
+                    # Show the screen when a print starts, ends or fails
+                    self._screen_activity()
+                    self._loop.create_task(self.display.wake())
                 if state:
                     self.current_state = state
                     logger.info(f"Status Update: {state}")
