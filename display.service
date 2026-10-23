@@ -11,11 +11,8 @@ Group=mks
 WorkingDirectory=/home/mks/display_connector
 # Self-sync systemd units from the repo on startup so Moonraker-triggered restarts
 # can apply updated unit files without re-running the installer manually.
-ExecStartPre=+/usr/bin/install -m 0644 /home/mks/display_connector/affinity.service /etc/systemd/system/affinity.service
 ExecStartPre=+/usr/bin/install -m 0644 /home/mks/display_connector/display.service /etc/systemd/system/display.service
-ExecStartPre=+/bin/chmod 0755 /home/mks/display_connector/affinity-setup.sh
 ExecStartPre=+/bin/systemctl daemon-reload
-ExecStartPre=+/bin/systemctl enable affinity.service
 # Let the connector manage Wi-Fi via NetworkManager (best effort: never block startup)
 ExecStartPre=-+/bin/sh /home/mks/display_connector/wifi-permissions-setup.sh mks
 ExecStartPre=/bin/sleep 10
