@@ -649,6 +649,12 @@ class ElegooDisplayCommunicator(DisplayCommunicator):
         page = self.mapper.map_page(PAGE_WIFI_KEYBOARD)
         await self.write(f'{page}.t0.txt="{_wifi_text(ssid)}"')
 
+    async def update_plr_setting_ui(self, enabled):
+        # The Power Loss Recovery switch in the advanced settings, which uses
+        # the Key Sound switch's pictures
+        page = self.mapper.map_page(PAGE_SETTINGS_ADVANCED)
+        await self.write(f"{page}.p0.pic={77 if enabled else 76}")
+
     async def update_continue_print_ui(self, text):
         page = self.mapper.map_page(PAGE_CONTINUE_PRINT)
         text = text.replace('"', "'").replace("\\", "/")

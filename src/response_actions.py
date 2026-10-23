@@ -269,6 +269,10 @@ named_response_actions = {
         8: "page " + PAGE_SETTINGS_ABOUT,
         9: "page " + PAGE_SETTINGS_ADVANCED,
     },
+    # Advanced settings: the Power Loss Recovery switch
+    "multiset": {
+        1: "plr_toggle",
+    },
     # Power-loss recovery prompt (OpenNept4une PLR_RESUME / PLR_DISCARD macros)
     "continueprint": {
         0: "plr_resume",
