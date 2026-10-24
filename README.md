@@ -31,6 +31,32 @@ It includes upstream's `dev` branch (up to 3272efe, 2026-10-09) and adds:
   shows the size, firmware version and IP in the right fields.
 - **UTF-8 text** on the screen, so values such as "°" aren't dropped.
 
+### Choices this fork makes
+
+- **The screen goes completely dark after 20 minutes without use.** This is
+  normal and not a fault: the printer is still on. Touch the screen anywhere
+  to turn it back on; that touch doesn't press anything on the page. It also
+  turns on by itself when a print starts, finishes, is cancelled or fails, or
+  when the printer needs attention (power-loss recovery prompt, filament
+  runout), and it stays on during a print. The stock firmware only dims the
+  backlight, which doesn't stop a static page burning a ghost image into the
+  LCD; turning it off does.
+  - To keep the screen on, turn off **Backlight** in the screen's advanced
+    settings, which also stops the stock dimming.
+  - To change the times, add a `[screen_sleep]` section to
+    `~/printer_data/config/display_connector.cfg` (`idle_timeout`,
+    `print_timeout` in minutes, 0 = never) and restart the display service
+    ([docs/screen-sleep.md](docs/screen-sleep.md)).
+- **Wi-Fi is set up with the stock firmware's own pages.** The Elegoo
+  firmware has a Wi-Fi list and keyboard that the connector didn't use. They
+  are reached from the Plus/Max settings page; the Neptune 4 and 4 Pro
+  settings page has no Wi-Fi entry.
+- **The about page is written by component name**, not by number, because
+  screen firmware 1.2.22 moved its fields.
+- **The Power Loss Recovery switch** reuses the advanced settings switch the
+  stock firmware already shows. It creates or removes
+  `~/printer_data/plr/disabled`, which OpenNept4une's recovery reads.
+
 ## Supported Displays and Firmware
 
 - TJC4827X243_011 (Neptune 3 and 4 Display)
